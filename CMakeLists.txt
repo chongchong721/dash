@@ -73,3 +73,5 @@ endif ()
 
 #build shared library
 add_library(dash_pibench_wrapper SHARED wrapper/dash.cpp)
+target_link_libraries(dash_pibench_wrapper PRIVATE ${libs_to_link})
+add_dependencies(dash_pibench_wrapper PMDK)

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include <random>
 
 #include "../util/System.hpp"
 #include "../util/key_generator.hpp"
@@ -23,7 +24,7 @@
 #include "lh_finger.h"
 #include "libpmemobj.h"
 
-std::string pool_name = "/mnt/pmem0/";
+std::string pool_name = "/mnt/pmem0/kane/dash/pool/poolpmem";
 DEFINE_string(index, "dash-ex",
               "the index to evaluate:dash-ex/dash-lh/cceh/level");
 DEFINE_string(k, "fixed", "the type of stored keys: fixed/variable");
@@ -224,6 +225,7 @@ void Load(int kv_num, Hash<T> *index, int length, void *workload) {
   std::string fixed("fixed");
   T *_worklod = reinterpret_cast<T *>(workload);
   T key;
+  auto start = std::chrono::high_resolution_clock::now();
   if constexpr (!std::is_pointer_v<T>) {
     for (uint64_t i = 0; i < kv_num; ++i) {
       index->Insert(_worklod[i], DEFAULT);
@@ -236,7 +238,9 @@ void Load(int kv_num, Hash<T> *index, int length, void *workload) {
       index->Insert(key, DEFAULT);
     }
   }
-  std::cout << "Finish loading " << kv_num << " keys" << std::endl;
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
+  std::cout << "Finish loading " << kv_num << " keys in" << duration.count() << " milliseconds" << std::endl;
 }
 
 inline void spin_wait() {
@@ -1003,6 +1007,7 @@ void Run() {
   Load<T>(load_num, index, var_length, insert_workload);
   void *not_used_workload;
   void *not_used_insert_workload;
+  uint64_t *random_search_workload = new uint64_t[operation_num];
 
   if (key_type == "fixed") {
     uint64_t *key_array = reinterpret_cast<uint64_t *>(workload);
@@ -1050,8 +1055,19 @@ void Run() {
       std::cout << "Please first specify the # pre_load keys!" << std::endl;
       return;
     }
+
+    uint64_t * key_arr = reinterpret_cast<uint64_t *>(workload);
+    std::default_random_engine engine(time(nullptr));
+    std::uniform_int_distribution<int> dis(0,load_num - 1);
+
+    for(int i=0; i < operation_num ; ++i){
+      random_search_workload[i] = key_arr[dis(engine)];
+    }
+
+    void *_workload = reinterpret_cast<void *>(random_search_workload);
+
     for (int i = 0; i < thread_num; ++i) {
-      rarray[i].workload = workload;
+      rarray[i].workload = _workload;
     }
     if (open_epoch == true) {
       GeneralBench<T>(rarray, index, thread_num, operation_num, "Pos_search",

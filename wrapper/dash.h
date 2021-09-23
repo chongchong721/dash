@@ -6,7 +6,7 @@
 #include "../src/ex_finger.h"
 #include "../src/allocator.h"
 
-static const char *wrapper_path = "/mnt/pmem0/dash.data";
+static const char *wrapper_path = "/mnt/pmem0/kane/dash/pool/dash.data";
 
 class dash_wrapper : public tree_api
 {
