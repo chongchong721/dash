@@ -484,6 +484,7 @@ void concurr_search(struct range *_range, Hash<T> *index) {
   char *workload = reinterpret_cast<char *>(_range->workload);
   T key;
   uint64_t not_found = 0;
+  uint64_t count = 0;
 
   if constexpr (!std::is_pointer_v<T>) {
     T *key_array = reinterpret_cast<T *>(workload);
@@ -495,7 +496,12 @@ void concurr_search(struct range *_range, Hash<T> *index) {
       auto epoch_guard = Allocator::AquireEpochGuard();
       uint64_t _end = begin + (i + 1) * EPOCH_DURATION;
       for (uint64_t j = begin + i * EPOCH_DURATION; j < _end; ++j) {
-        if (index->Get(key_array[j], true) == NONE) not_found++;
+        if (index->Get(key_array[j], true) == NONE){
+          not_found++;
+          count++;
+        }
+        else
+          count++;
       }
       ++i;
     }
@@ -503,7 +509,12 @@ void concurr_search(struct range *_range, Hash<T> *index) {
     {
       auto epoch_guard = Allocator::AquireEpochGuard();
       for (i = begin + EPOCH_DURATION * round; i < end; ++i) {
-        if (index->Get(key_array[i], true) == NONE) not_found++;
+        if (index->Get(key_array[i], true) == NONE) {
+          not_found++;
+          count++;
+        }
+        else
+          count++;
       }
     }
   } else {
@@ -532,6 +543,7 @@ void concurr_search(struct range *_range, Hash<T> *index) {
     }
   }
   std::cout << "not_found = " << not_found << std::endl;
+  std::cout << "count = " << count << std::endl;
   end_notify(_range);
 }
 

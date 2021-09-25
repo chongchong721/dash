@@ -19,7 +19,7 @@ public:
             std::cout << "Dash pool already exists, please remove it for testing" << std::endl;
         }
 
-        Allocator::Initialize(wrapper_path, 1024ul * 1024ul * 1024ul * 10ul);
+        Allocator::Initialize(wrapper_path, 1024ul * 1024ul * 1024ul * 30ul);
         dash_instance_ = reinterpret_cast<extendible::Finger_EH<uint64_t> *>(
             Allocator::GetRoot(sizeof(extendible::Finger_EH<uint64_t>)));
 
