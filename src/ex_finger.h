@@ -2134,7 +2134,7 @@ FINAL:
 
 template <class T>
 Value_t Finger_EH<T>::Get(T key, bool is_in_epoch, size_t * count) {
-  *count++;
+  (*count)++;
   if (!is_in_epoch) {
     auto epoch_guard = Allocator::AquireEpochGuard();
     return Get(key);
