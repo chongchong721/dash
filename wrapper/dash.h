@@ -45,7 +45,7 @@ public:
         }
         insert_counter = (insert_counter + 1) & ((1 << 10) - 1);
 
-        auto value = dash_instance_->Get(*reinterpret_cast<uint64_t*>(const_cast<char*>(key)));
+        auto value = dash_instance_->Get(*reinterpret_cast<uint64_t*>(const_cast<char*>(key)), true);
 
         if(insert_counter == 1023){
             // Exit the epoch
