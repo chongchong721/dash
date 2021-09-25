@@ -2130,6 +2130,7 @@ class Linear : public Hash<T> {
   Directory<T> dir;
   int lock;
   bool clean;
+  Value_t Get(T key, bool is_in_epoch, size_t *count);
 };
 
 template <class T>
@@ -2460,6 +2461,169 @@ RETRY:
         }
       }
     TEST_STASH:
+      if (test_stash == true) {
+        for (int i = 0; i < stashBucket; ++i) {
+          overflowBucket<T> *curr_bucket =
+              target->stash + ((i + (y & stashMask)) & stashMask);
+          auto ret = curr_bucket->check_and_get(meta_hash, key);
+          if (ret != NONE) {
+            if (target_bucket->test_lock_version_change(old_version)) {
+              goto RETRY;
+            }
+            return ret;
+          }
+        }
+
+        overflowBucket<T> *prev_bucket = target->stash;
+        overflowBucket<T> *next_bucket = target->stash->next;
+        while (next_bucket != NULL) {
+          auto ret = next_bucket->check_and_get(meta_hash, key);
+          if (ret != NONE) {
+            if (target_bucket->test_lock_version_change(old_version)) {
+              goto RETRY;
+            }
+            return ret;
+          }
+          prev_bucket = next_bucket;
+          next_bucket = next_bucket->next;
+        }
+      }
+    }
+  } else {
+    for (int i = 0; i < kNumBucket; ++i) {
+      Bucket<T> *curr_bucket = target->bucket + i;
+      curr_bucket->get_lock();
+    }
+
+    uint64_t new_N_next = dir.N_next;
+    uint32_t new_N = new_N_next >> 32;
+    uint32_t new_next = (uint32_t)new_N_next;
+    if (((next <= x) && (new_next > x)) || (new_N != N)) {
+      for (int i = 0; i < kNumBucket; ++i) {
+        Bucket<T> *curr_bucket = target->bucket + i;
+        curr_bucket->release_lock();
+      }
+      goto RETRY;
+    }
+
+    uint64_t org_idx;
+    uint64_t base_level;
+    Table<T> *org_table = target->get_org_table(x, &org_idx, &base_level, &dir);
+    target->Split(org_table, base_level, org_idx, &dir);
+
+    for (int i = 0; i < kNumBucket; ++i) {
+      Bucket<T> *curr_bucket = target->bucket + i;
+      curr_bucket->release_lock();
+    }
+    goto RETRY;
+  }
+  return NONE;
+}
+
+template <class T>
+Value_t Linear<T>::Get(T key, bool is_in_epoch, size_t * count) {
+  ++ (*count);
+  if (!is_in_epoch) {
+    auto epoch_guard = Allocator::AquireEpochGuard();
+    return Get(key);
+  }
+
+  uint64_t key_hash;
+  if constexpr (std::is_pointer_v<T>) {
+    key_hash = h(key->key, key->length);
+  } else {
+    key_hash = h(&key, sizeof(key));
+  }
+  auto meta_hash = META_HASH(key_hash);
+  auto y = BUCKET_INDEX(key_hash);
+  RETRY:
+  uint64_t old_N_next = dir.N_next;
+  uint32_t N = old_N_next >> 32;
+  uint32_t next = (uint32_t)old_N_next;
+
+  auto x = IDX(key_hash, N);
+  if (x < next) {
+    x = IDX(key_hash, N + 1);
+  }
+
+  uint32_t dir_idx;
+  uint32_t offset;
+  SEG_IDX_OFFSET(static_cast<uint32_t>(x), dir_idx, offset);
+  Table<T> *target = dir._[dir_idx] + offset;
+
+  if (reinterpret_cast<uint64_t>(dir._[dir_idx]) & recoverLockBit) {
+    recoverSegment(&dir._[dir_idx], x, dir_idx, offset);
+    target =
+        (Table<T> *)((uint64_t)(dir._[dir_idx]) & (~recoverLockBit)) + offset;
+  }
+
+  Bucket<T> *target_bucket = target->bucket + y;
+  Bucket<T> *neighbor_bucket = target->bucket + ((y + 1) & bucketMask);
+  uint32_t old_version = target_bucket->version_lock;
+  uint32_t old_neighbor_version = neighbor_bucket->version_lock;
+
+  if ((old_version & lockSet) || (old_neighbor_version & lockSet)) {
+    goto RETRY;
+  }
+
+  if (old_version & initialSet) {
+    uint64_t new_N_next = dir.N_next;
+    uint32_t new_N = new_N_next >> 32;
+    uint32_t new_next = (uint32_t)new_N_next;
+    if (((next <= x) && (new_next > x)) || (new_N != N)) {
+      goto RETRY;
+    }
+
+    auto ret = target_bucket->check_and_get(meta_hash, key, false);
+    if (target_bucket->test_lock_version_change(old_version)) {
+      goto RETRY;
+    }
+
+    if (ret != NONE) {
+      return ret;
+    }
+
+    /*no need for verification procedure, we use the version number of
+     * target_bucket to test whether the bucket has ben spliteted*/
+    ret = neighbor_bucket->check_and_get(meta_hash, key, true);
+    if (neighbor_bucket->test_lock_version_change(old_neighbor_version)) {
+      goto RETRY;
+    }
+    if (ret != NONE) {
+      return ret;
+    }
+
+    if (target_bucket->test_stash_check()) {
+      auto test_stash = false;
+      if (target_bucket->test_overflow()) {
+        test_stash = true;
+      } else {
+        // search in the original bucket
+        int mask = target_bucket->overflowBitmap & overflowBitmapMask;
+        if (mask != 0) {
+          for (int i = 0; i < 4; ++i) {
+            if (CHECK_BIT(mask, i) &&
+                (target_bucket->finger_array[14 + i] == meta_hash) &&
+                (((1 << i) & target_bucket->overflowMember) == 0)) {
+              test_stash = true;
+              goto TEST_STASH;
+            }
+          }
+        }
+
+        mask = neighbor_bucket->overflowBitmap & overflowBitmapMask;
+        if (mask != 0) {
+          for (int i = 0; i < 4; ++i) {
+            if (CHECK_BIT(mask, i) &&
+                (neighbor_bucket->finger_array[14 + i] == meta_hash) &&
+                (((1 << i) & neighbor_bucket->overflowMember) != 0)) {
+              test_stash = true;
+              break;
+            }
+          }
+        }
+      }
+      TEST_STASH:
       if (test_stash == true) {
         for (int i = 0; i < stashBucket; ++i) {
           overflowBucket<T> *curr_bucket =

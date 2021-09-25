@@ -133,6 +133,7 @@ class LevelHashing : public Hash<T> {
   bool Delete(T key, bool is_in_epoch) { return Delete(key); }
   Value_t Get(T);
   Value_t Get(T key, bool flag) { return Get(key); }
+  Value_t Get(T key, bool flag, size_t * count) { ++(*count) ; return Get(key); }
   void Recovery() {
     if (resizing) {
       if (!OID_IS_NULL(_old_mutex) && !OID_EQUALS(_old_mutex, _mutex)) {

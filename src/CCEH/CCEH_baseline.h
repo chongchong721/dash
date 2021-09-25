@@ -356,6 +356,7 @@ class CCEH : public Hash<T> {
 #ifdef PMEM
   PMEMobjpool *pool_addr;
 #endif
+  Value_t Get(T key, bool is_in_epoch, size_t *count);
 };
 //#endif  // EXTENDIBLE_PTR_H_
 
@@ -801,6 +802,19 @@ RETRY:
 
 template <class T>
 Value_t CCEH<T>::Get(T key, bool is_in_epoch) {
+  if (is_in_epoch) {
+#ifdef EPOCH
+    auto epoch_guard = Allocator::AquireEpochGuard();
+#endif
+    return Get(key);
+  }
+  return Get(key);
+}
+
+
+template <class T>
+Value_t CCEH<T>::Get(T key, bool is_in_epoch, size_t * count) {
+  ++(*count);
   if (is_in_epoch) {
 #ifdef EPOCH
     auto epoch_guard = Allocator::AquireEpochGuard();
