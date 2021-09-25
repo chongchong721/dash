@@ -1489,6 +1489,7 @@ class Finger_EH : public Hash<T> {
   bool Delete(T, bool);
   inline Value_t Get(T);
   Value_t Get(T key, bool is_in_epoch);
+  Value_t Get(T key, bool is_in_epoch, size_t *count);
   void TryMerge(uint64_t);
   void Directory_Doubling(int x, Table<T> *new_b, Table<T> *old_b);
   void Directory_Merge_Update(Directory<T> *_sa, uint64_t key_hash,
@@ -2130,6 +2131,141 @@ RETRY:
 FINAL:
   return NONE;
 }
+
+template <class T>
+Value_t Finger_EH<T>::Get(T key, bool is_in_epoch, size_t * count) {
+  *count++;
+  if (!is_in_epoch) {
+    auto epoch_guard = Allocator::AquireEpochGuard();
+    return Get(key);
+  }
+  uint64_t key_hash;
+  if constexpr (std::is_pointer_v<T>) {
+    key_hash = h(key->key, key->length);
+  } else {
+    key_hash = h(&key, sizeof(key));
+  }
+  auto meta_hash = ((uint8_t)(key_hash & kMask));  // the last 8 bits
+  RETRY:
+  auto old_sa = dir;
+  auto x = (key_hash >> (8 * sizeof(key_hash) - old_sa->global_depth));
+  auto y = BUCKET_INDEX(key_hash);
+  auto dir_entry = old_sa->_;
+  auto old_entry = dir_entry[x];
+  Table<T> *target = reinterpret_cast<Table<T> *>(
+      reinterpret_cast<uint64_t>(old_entry) & tailMask);
+
+  if ((reinterpret_cast<uint64_t>(old_entry) & headerMask) != crash_version) {
+    recoverTable(&dir_entry[x], key_hash, x, old_sa);
+    goto RETRY;
+  }
+
+  Bucket<T> *target_bucket = target->bucket + y;
+  Bucket<T> *neighbor_bucket = target->bucket + ((y + 1) & bucketMask);
+
+  uint32_t old_version =
+      __atomic_load_n(&target_bucket->version_lock, __ATOMIC_ACQUIRE);
+  uint32_t old_neighbor_version =
+      __atomic_load_n(&neighbor_bucket->version_lock, __ATOMIC_ACQUIRE);
+
+  if ((old_version & lockSet) || (old_neighbor_version & lockSet)) {
+    goto RETRY;
+  }
+
+  /*verification procedure*/
+  old_sa = dir;
+  x = (key_hash >> (8 * sizeof(key_hash) - old_sa->global_depth));
+  if (old_sa->_[x] != old_entry) {
+    goto RETRY;
+  }
+
+  auto ret = target_bucket->check_and_get(meta_hash, key, false);
+  if (target_bucket->test_lock_version_change(old_version)) {
+    goto RETRY;
+  }
+  if (ret != NONE) {
+    return ret;
+  }
+
+  /*no need for verification procedure, we use the version number of
+   * target_bucket to test whether the bucket has ben spliteted*/
+  ret = neighbor_bucket->check_and_get(meta_hash, key, true);
+  if (neighbor_bucket->test_lock_version_change(old_neighbor_version)) {
+    goto RETRY;
+  }
+  if (ret != NONE) {
+    return ret;
+  }
+
+  if (target_bucket->test_stash_check()) {
+    auto test_stash = false;
+    if (target_bucket->test_overflow()) {
+      /*this only occur when the bucket has more key-values than 10 that are
+       * overfloed int he shared bucket area, therefore it needs to search in
+       * the extra bucket*/
+      test_stash = true;
+    } else {
+      /*search in the original bucket*/
+      int mask = target_bucket->overflowBitmap & overflowBitmapMask;
+      if (mask != 0) {
+        for (int i = 0; i < 4; ++i) {
+          if (CHECK_BIT(mask, i) &&
+              (target_bucket->finger_array[14 + i] == meta_hash) &&
+              (((1 << i) & target_bucket->overflowMember) == 0)) {
+            Bucket<T> *stash =
+                target->bucket + kNumBucket +
+                ((target_bucket->overflowIndex >> (i * 2)) & stashMask);
+            auto ret = stash->check_and_get(meta_hash, key, false);
+            if (ret != NONE) {
+              if (target_bucket->test_lock_version_change(old_version)) {
+                goto RETRY;
+              }
+              return ret;
+            }
+          }
+        }
+      }
+
+      mask = neighbor_bucket->overflowBitmap & overflowBitmapMask;
+      if (mask != 0) {
+        for (int i = 0; i < 4; ++i) {
+          if (CHECK_BIT(mask, i) &&
+              (neighbor_bucket->finger_array[14 + i] == meta_hash) &&
+              (((1 << i) & neighbor_bucket->overflowMember) != 0)) {
+            Bucket<T> *stash =
+                target->bucket + kNumBucket +
+                ((neighbor_bucket->overflowIndex >> (i * 2)) & stashMask);
+            auto ret = stash->check_and_get(meta_hash, key, false);
+            if (ret != NONE) {
+              if (target_bucket->test_lock_version_change(old_version)) {
+                goto RETRY;
+              }
+              return ret;
+            }
+          }
+        }
+      }
+      goto FINAL;
+    }
+    TEST_STASH:
+    if (test_stash == true) {
+      for (int i = 0; i < stashBucket; ++i) {
+        Bucket<T> *stash =
+            target->bucket + kNumBucket + ((i + (y & stashMask)) & stashMask);
+        auto ret = stash->check_and_get(meta_hash, key, false);
+        if (ret != NONE) {
+          if (target_bucket->test_lock_version_change(old_version)) {
+            goto RETRY;
+          }
+          return ret;
+        }
+      }
+    }
+  }
+  FINAL:
+  return NONE;
+}
+
 
 template <class T>
 Value_t Finger_EH<T>::Get(T key) {
