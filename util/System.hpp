@@ -28,14 +28,14 @@ struct System
         if (pid == 0) {
             // perf to generate the record file
 #ifdef PROFILE
-            auto fd=open("/dev/null",O_RDWR);
-            dup2(fd,1);
-            dup2(fd,2);
-            exit(execl("/usr/bin/perf","perf","record","-o",filename.c_str(),"-p",s.str().c_str(),nullptr));
-#else
+//            auto fd=open("/dev/null",O_RDWR);
+//            dup2(fd,1);
+//            dup2(fd,2);
+//            exit(execl("/usr/bin/perf","perf","record","-o",filename.c_str(),"-p",s.str().c_str(),nullptr));
+
             // perf the cache misses of the file
             char buf[200];
-            //sprintf(buf, "perf stat -e cache-misses,cache-references,L1-dcache-load-misses,LLC-loads,LLC-load-misses,LLC-stores,LLC-store-misses,r412e -p %d > %s 2>&1",ppid,filename.c_str());
+            //sprintf(buf, "perf stat -e instructions,cache-misses,cache-references,L1-dcache-load-misses,LLC-loads,LLC-load-misses,LLC-stores,LLC-store-misses,r412e -p %d > %s 2>&1",ppid,filename.c_str());
             sprintf(buf, "perf stat -p %d > %s 2>&1",ppid,filename.c_str());
             execl("/bin/sh", "sh", "-c", buf, NULL);
 #endif

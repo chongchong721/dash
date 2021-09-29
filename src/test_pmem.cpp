@@ -801,7 +801,7 @@ void GeneralBench(range *rarray, Hash<T> *index, int thread_num,
   bar_c = thread_num;
 
   std::cout << profile_name << " Begin" << std::endl;
-  //  System::profile(profile_name, [&]() {
+  System::profile(profile_name, [&]() {
   for (uint64_t i = 0; i < thread_num; ++i) {
     thread_array[i] = new std::thread(*test_func, &rarray[i], index);
   }
@@ -841,7 +841,7 @@ void GeneralBench(range *rarray, Hash<T> *index, int thread_num,
       "ops/s, fastest = %f, slowest = %f\n",
       thread_num, duration, operation_num / duration, operation_num / shortest,
       operation_num / longest);
-  //  });
+  });
   std::cout << profile_name << " End" << std::endl;
 }
 
