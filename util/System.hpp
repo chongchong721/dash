@@ -37,6 +37,7 @@ struct System
             char buf[200];
             //sprintf(buf, "perf stat -e instructions,cache-misses,cache-references,L1-dcache-load-misses,LLC-loads,LLC-load-misses,LLC-stores,LLC-store-misses,r412e -p %d > %s 2>&1",ppid,filename.c_str());
             sprintf(buf, "perf stat -p %d > %s 2>&1",ppid,filename.c_str());
+            sprintf(buf, "perf report -e instructions,cpu-cycles -g -F 97 -p %d -o %s",ppid,filename.c_str());
             execl("/bin/sh", "sh", "-c", buf, NULL);
 #endif
         }

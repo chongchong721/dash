@@ -37,16 +37,16 @@ public:
     
     virtual bool find(const char* key, size_t key_sz, char* value_out) override
     {
-        static thread_local size_t * count = new size_t(0);
         // For now only test 8 bytes key and value (uint64_t)
-        thread_local int insert_counter(0);
+//        thread_local int insert_counter(0);
+        static int insert_counter = 0;
         if(insert_counter == 0){
             // Enroll into the epoch
             Allocator::Protect();
         }
         insert_counter = (insert_counter + 1) & ((1 << 10) - 1);
 
-        auto value = dash_instance_->Get(*reinterpret_cast<uint64_t*>(const_cast<char*>(key)), true, count);
+        auto value = dash_instance_->Get(*reinterpret_cast<uint64_t*>(const_cast<char*>(key)));
 
         if(insert_counter == 1023){
             // Exit the epoch
@@ -54,8 +54,6 @@ public:
         }
         if (value == nullptr)
             return false;
-        if( (*count) % 1000000 == 0)
-          std::cout << *count << std::endl;
         memcpy(value_out, &value, sizeof(value));
         return true;
     }
